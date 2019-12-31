@@ -29,12 +29,64 @@ void *accept_request(void* client);
 //执行cgi脚本
 void execute_cgi(int, const char *, const char *, const char *);
 
+
+//启动服务端
+int startup(u_short *port)
+{
+	int httpd = 0;
+	struct sockaddr_in name;
+
+	//设置http socket
+	//返回socket描述符
+	//SOCK_STREAM:TCP协议，0:自断选择协议
+	httpd = socket(PF_INET, SOCK_STREAM, 0);
+	
+	//如果没有获得套接字则返回-1
+	if (httpd == -1)
+	{
+		error_die("socket error");
+	}
+
+	//初始化name各个字节为0，防止有未初始化的垃圾值存在
+	memset(&name, 0, sizeof(name));
+
+	name.sin_family = AF_INET;
+	name.sin_port = htons(*port);
+
+	//INADDR_ANY表示任何网络地址都可以访问
+	name.sin_addr.s_addr = htonl(INADDR_ANY);
+
+	//绑定端口
+	if (bind(httpd, (struct sockaddr *)&name, sizeof(name)) < 0)
+	  error_die("bind");
+
+	//如果端口没有设置，提供个随机端口
+	 if (*port == 0)  /*动态分配一个端口 */
+	{
+	 socklen_t  namelen = sizeof(name);
+	 if (getsockname(httpd, (struct sockaddr *)&name, &namelen) == -1)
+	   error_die("getsockname");
+	 *port = ntohs(name.sin_port);
+	}
+
+}
+
+
 //main
 int main()
 {
 	int server_sock = -1;
 	u_short port = 0;
 	int client_sock = -1;
+
+	//struct sockaddr_in{
+	//__uint8_t sin_len;
+	//sa_family_t sin_family;
+	//in_port_t sin_port;
+	//struct in_addr sin_addr;
+	//char	sin_zero[8];
+
+
 	struct sockaddr_in client_name;
 
 	//socklen_t类型
@@ -53,7 +105,7 @@ int main()
 		//#include <sys/socket.h>
 		//int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen);	 
 		client_sock =  accept(server_sock, (struct sockaddr *) &client_name,&client_name_len);
-
+		
 		if(client_sock == -1)
 		  error_die("accept wrong");
 
