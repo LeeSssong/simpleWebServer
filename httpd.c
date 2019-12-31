@@ -30,6 +30,131 @@ void *accept_request(void* client);
 void execute_cgi(int, const char *, const char *, const char *);
 
 
+//接收客户端的连接，并读取请求数据
+void *accept_request(void* from_client)
+{
+	int client = *(int *)from_client;
+	char buf[1024];
+	int numchars;
+	char method[255];
+	char url[255];
+	char path[512];
+	size_t i, j;
+	struct stat st;
+
+	//标志位，若为post或get请求，则为1
+	int cgi = 0;
+	
+	char *query_string = NULL;
+
+	//处理第一行http信息
+	numchars = get_line(client, buf, sizeof(buf));
+	i = 0; j = 0;
+
+	 //对于HTTP报文来说，第一行的内容即为报文的起始行，格式为<method> <reque	  st-URL> <version>
+	 //每个字段用空白字符相连
+	 //如果请求网址为http://172.0.0.1:端口号/idnex.html
+	 //那么得到的第一条http为
+	 //GET /index.html HTTP/1.1
+	 while (!ISspace(buf[j]) && (i < sizeof(method) - 1))
+ 	{
+	//提取其中的请求方式是GET还是POST
+	 method[i] = buf[j];
+  	 i++; j++;
+ 	}
+	 method[i] = '\0';
+
+	 //函数说明：strcasecmp()用来比较参数s1 和s2 字符串，比较时会自动忽略大			    小写的差异。
+	 //返回值：若参数s1 和s2 字符串相同则返回0。s1 长度大于s2 长度则返回大于	 	   0 的值，s1 长度若小于s2 长度则返回小于0 的值。
+	 if( strcasecmp(method, "GET") && strcasecmp(method, "POST"))
+	 {
+		 unimplement(client);
+		 return NULL;
+	 }
+
+	 //cgi为标志位，此时开启cgi解析
+	 if (strcasecmp(method, "POST") == 0)
+		 cgi = 1;
+	
+	 i = 0;
+
+	 //将method后面的空白字符串过滤
+	 while (ISspace(buf[j]) && (j < sizeof(buf)))
+		 j++;
+
+	 //读取url
+	 while (!ISspace(buf[j]) && (i < sizeof(url) - 1) && (j < sizeof(buf)))
+ 	 {
+  	  url[i] = buf[j];
+  	  i++; j++;
+ 	 }
+	 url[i] = '\0';
+	
+	 //若请求方式为get,则可能会带有?参数查询
+	 if (strcasecmp(method, "GET") == 0)
+	 {
+		 query_string = url;
+		 while ((*query_string != '?') && (*query_string != '\0'))
+		 {
+			 query_string++;
+
+		 }
+		 if (*query_string == '?')
+		 {
+			 //使用cgi处理参数
+			 cgi = 1;
+			 
+			 //截取参数
+			 *query_string = '\0';
+			 query_string ++;
+
+		 }
+	 }
+
+	 //将url中的路径格式转化到path
+	 sprintf(path, "htdocs%s", url);
+
+	 //默认地址，解析到的路径如果为/，则自动加上index.html
+	 if (path[strlen(path) -1] == '/')
+		 strcat(path,"index.html");
+
+	 //int stat(const char *file_name, struct stat *buf)
+	 //通过文件名filename获取文件信息，并保存在buf所指的结构体stat中
+	 //返回值： 成功则0，失败则-1，错误代码存于errno（需要include <errno.h>		   ）
+	 if (stat(path,&st) == -1)
+	 {
+		 //如果访问的网页不存在，则不断读取剩下的请求头信息，并丢弃
+		 while ((numchars >0) && ("\n",buf))
+			 numchars = get_line(client, buf, sizeof(buf));
+
+		 //声明网页不存在
+		 not_found(client);
+	 }
+	 else
+	 {
+		 //如果网页存在则进行处理
+		 if ((st.st_mode & S_IFMT) == S_IFDIR) //S_IFDIR代表目录
+			 //如果路径是目录，则显示主页
+			 strcat(path, "index.html");
+		 if ((st.st_mode & S_IXUSR) ||
+      		     (st.st_mode & S_IXGRP) ||
+      	             (st.st_mode & S_IXOTH))
+      	             //S_IXUSR:文件所有者具可执行权限
+                     //S_IXGRP:用户组具可执行权限
+                     //S_IXOTH:其他用户具可读取权限
+		     cgi = 1;
+		 if( !cgi )
+			 //如果请求的不需要cgi处理，则返回静态网页
+			 serve_file(client, path);
+		 else
+			 //执行cgi动态解析
+			 execute_cgi(client, path, method, query_string);
+	 }
+	 //关闭
+	 close(client);
+	 return NULL;
+}
+
 //启动服务端
 int startup(u_short *port)
 {
