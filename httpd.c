@@ -155,6 +155,149 @@ void *accept_request(void* from_client)
 	 return NULL;
 }
 
+
+//调用cgi
+void execute_cgi(int client, const char *path,const char *method, const char *query_string)
+{
+	//缓冲区大小
+	char buf[1024];
+
+	//2根管道
+	int cgi_output[2];
+	int cgi_input[2];
+
+	//进程pid与状态
+	pid_t pid;
+	int status;
+
+	
+	int i;
+	char c;
+
+	//读取字符数
+	int numchars = 1;
+
+	//http的content_length；
+	int content_length = -1;
+
+	//默认字符
+	buf[0] = 'A'; buf[1] = '\0';
+
+	//如果是 http 请求是 GET 方法的话读取并忽略请求剩下的内容
+	if (strcasecmp(method, "GET") == 0)
+	//读取数据，把整个header都读掉，以为Get写死了直接读取index.html，没有必要分析余下的http信息了
+	  while ((numchars > 0) && strcmp("\n", buf))
+		numchars = get_line(client, buf, sizeof(buf));
+	else
+	{
+		//只有 POST 方法才继续读内容
+		numchars = get_line(client, buf, sizeof(buf));
+		//				这个循环的目的是读出指示body长度大小的参数，并记录body的长度大小。其余的 header 里面的参数一律忽略
+		//注意这里只读完 header 的内容，body 的内容没有读
+		while ((numchars > 0) && strcmp("\n", buf))
+		{
+			//如果是POST请求，就需要得到Content-Length，Content-Length：这个字符串一共长为15位，所以
+			//取出头部一句后，将第16位设置结束符，进行比较
+			//第16位置为结束
+			 buf[15] = '\0';
+			 if (strcasecmp(buf, "Content-Length:") == 0)
+			//内存从第17位开始就是长度，将17位开始的所有字符串转成整数就是content_length
+			   content_length = atoi(&(buf[16])); //记录 body 的长度大小
+			 numchars = get_line(client, buf, sizeof(buf));
+		}
+		//如果 http 请求的 header 没有指示 body 长度大小的参数，则报错返回
+		if (content_length == -1) {
+			bad_request(client);
+			return;
+		}
+	}
+
+	sprintf(buf, "HTTP/1.0 200 OK\r\n");
+	send(client, buf, strlen(buf), 0);
+	//建立output管道
+	if (pipe(cgi_output) < 0) {
+		cannot_execute(client);
+		return;
+	}
+	//建立input管道
+	if (pipe(cgi_input) < 0) {
+		cannot_execute(client);
+		return;
+	}
+
+	//       fork后管道都复制了一份，都是一样的
+	//       子进程关闭2个无用的端口，避免浪费
+	//       ×<------------------------->1    output
+	//       0<-------------------------->×   input
+	//
+	//       父进程关闭2个无用的端口，避免浪费
+	//       0<-------------------------->×   output
+	//       ×<------------------------->1    input
+	//       此时父子进程已经可以通信
+	
+	//fork进程，子进程用于执行CGI
+	//父进程用于收数据以及发送子进程处理的回复数据
+	if ( (pid = fork()) < 0 ) {
+		cannot_execute(client);
+		return;
+	}
+
+	if (pid == 0)
+	{
+		char meth_env[255];
+		char query_env[255];
+		char length_env[255];
+
+		//将子进程的输出由标准输出重定向到 cgi_ouput 的管道写端上
+		dup2(cgi_output[1], 1);
+		//将子进程的输出由标准输入重定向到 cgi_ouput 的管道读端上
+		dup2(cgi_input[0], 0);
+		//关闭 cgi_ouput 管道的读端与cgi_input 管道的写端
+		close(cgi_output[0]);
+		close(cgi_input[1]);
+
+		//构造一个环境变量
+		sprintf(meth_env, "REQUEST_METHOD=%s", method);
+		//将这个环境变量加进子进程的运行环境中
+		putenv(meth_env);
+
+		//根据http 请求的不同方法，构造并存储不同的环境变量
+		if (strcasecmp(method, "GET") == 0) {
+			sprintf(query_env, "QUERY_STRING=%s", query_string);
+			putenv(query_env);
+		}
+		 else {   /* POST */
+			 sprintf(length_env, "CONTENT_LENGTH=%d", content_length);
+			 putenv(length_env);
+		 }
+
+		 //最后将子进程替换成另一个进程并执行 cgi 脚本
+		 execl(path, path, NULL);
+		 exit(0);
+		 } 
+	else {    /* parent */
+		 //父进程则关闭了 cgi_output管道的写端和 cgi_input 管道的读端
+		 close(cgi_output[1]);
+		 close(cgi_input[0]);
+
+		 //如果是 POST 方法的话就继续读 body 的内容，并写到 cgi_input 管道里让子进程去读
+		 if (strcasecmp(method, "POST") == 0)
+		   for (i = 0; i < content_length; i++) {
+			   recv(client, &c, 1, 0);
+			   write(cgi_input[1], &c, 1);
+		   }
+
+		 //然后从 cgi_output 管道中读子进程的输出，并发送到客户端去
+		 while (read(cgi_output[0], &c, 1) > 0)
+		   send(client, &c, 1, 0);
+		 //关闭管道
+		 close(cgi_output[0]);
+		 close(cgi_input[1]);
+
+		 //等待子进程的退出
+		 waitpid(pid, &status, 0);
+	}
+}
 //启动服务端
 int startup(u_short *port)
 {
