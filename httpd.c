@@ -29,6 +29,8 @@ void *accept_request(void* client);
 //执行cgi脚本
 void execute_cgi(int, const char *, const char *, const char *);
 
+//如果不是cgi文件，直接读取文件返回给请求http的客户端
+void serve_file(int, const char *);
 
 //接收客户端的连接，并读取请求数据
 void *accept_request(void* from_client)
@@ -298,6 +300,34 @@ void execute_cgi(int client, const char *path,const char *method, const char *qu
 		 waitpid(pid, &status, 0);
 	}
 }
+
+//如果不是CGI文件，直接读取文件返回给请求的http客户端
+void serve_file(int client, const char *filename)
+{
+	FILE *resource = NULL;
+	int numchars = 1;
+	char buf[1024];
+
+	//确保 buf 里面有东西，能进入下面的 while 循环
+	buf[0] = 'A'; buf[1] = '\0';
+	//循环作用是读取并忽略掉这个 http 请求后面的所有内容
+	while ((numchars > 0) && strcmp("\n", buf))  /* read & discard headers */
+	  numchars = get_line(client, buf, sizeof(buf));
+	//打开这个传进来的这个路径所指的文件
+	resource = fopen(filename, "r");
+	if (resource == NULL)
+	  not_found(client);
+	else
+	{
+	//打开成功后，将这个文件的基本信息封装成 response 的头部(header)并返回
+		headers(client, filename);
+	//接着把这个文件的内容读出来作为 response 的 body 发送到客户端
+		cat(client, resource);
+	}
+	fclose(resource);
+}
+
+
 //启动服务端
 int startup(u_short *port)
 {
