@@ -24,7 +24,7 @@ int startup(u_short *);
 
 //每次接受到请求，都创建一个子线程来处理，实现多并发
 //把client_sock转换成地质作为参数传入pthread_create()
-void *accept_request(void* client);
+void accept_request(int client);
 
 //执行cgi脚本
 void execute_cgi(int, const char *, const char *, const char *);
@@ -60,128 +60,114 @@ void unimplemented(int);
 
 
 //接收客户端的连接，并读取请求数据
-void *accept_request(void* from_client)
+void accept_request(int client)
 {
-	int client = *(int *)from_client;
-	char buf[1024];
-	int numchars;
-	char method[255];
-	char url[255];
-	char path[512];
-	size_t i, j;
-	struct stat st;
+ char buf[1024];
+ int numchars;
+ char method[255];
+ char url[255];
+ char path[512];
+ size_t i, j;
+ struct stat st;
+ int cgi = 0;      /* becomes true if server decides this is a CGI
+                    * program */
+ char *query_string = NULL;
 
-	//标志位，若为post或get请求，则为1
-	int cgi = 0;
-	
-	char *query_string = NULL;
+ //读http 请求的第一行数据（request line），把请求方法存进 method 中
+ numchars = get_line(client, buf, sizeof(buf));
+ i = 0; j = 0;
+ while (!ISspace(buf[j]) && (i < sizeof(method) - 1))
+ {
+  method[i] = buf[j];
+  i++; j++;
+ }
+ method[i] = '\0';
 
-	//处理第一行http信息
-	numchars = get_line(client, buf, sizeof(buf));
-	i = 0; j = 0;
+ //如果请求的方法不是 GET 或 POST 任意一个的话就直接发送 response 告诉客户端没实现该方法
+ if (strcasecmp(method, "GET") && strcasecmp(method, "POST"))
+ {
+  unimplemented(client);
+  return;
+ }
 
-	 //对于HTTP报文来说，第一行的内容即为报文的起始行，格式为<method> <reque	  st-URL> <version>
-	 //每个字段用空白字符相连
-	 //如果请求网址为http://172.0.0.1:端口号/idnex.html
-	 //那么得到的第一条http为
-	 //GET /index.html HTTP/1.1
-	 while (!ISspace(buf[j]) && (i < sizeof(method) - 1))
- 	{
-	//提取其中的请求方式是GET还是POST
-	 method[i] = buf[j];
-  	 i++; j++;
- 	}
-	 method[i] = '\0';
+ //如果是 POST 方法就将 cgi 标志变量置一(true)
+ if (strcasecmp(method, "POST") == 0)
+  cgi = 1;
 
-	 //函数说明：strcasecmp()用来比较参数s1 和s2 字符串，比较时会自动忽略大			    小写的差异。
-	 //返回值：若参数s1 和s2 字符串相同则返回0。s1 长度大于s2 长度则返回大于	 	   0 的值，s1 长度若小于s2 长度则返回小于0 的值。
-	 if( strcasecmp(method, "GET") && strcasecmp(method, "POST"))
-	 {
-		 unimplement(client);
-		 return NULL;
-	 }
+ i = 0;
+ //跳过所有的空白字符(空格)
+ while (ISspace(buf[j]) && (j < sizeof(buf))) 
+  j++;
+ 
+ //然后把 URL 读出来放到 url 数组中
+ while (!ISspace(buf[j]) && (i < sizeof(url) - 1) && (j < sizeof(buf)))
+ {
+  url[i] = buf[j];
+  i++; j++;
+ }
+ url[i] = '\0';
 
-	 //cgi为标志位，此时开启cgi解析
-	 if (strcasecmp(method, "POST") == 0)
-		 cgi = 1;
-	
-	 i = 0;
+ //如果这个请求是一个 GET 方法的话
+ if (strcasecmp(method, "GET") == 0)
+ {
+  //用一个指针指向 url
+  query_string = url;
+  
+  //去遍历这个 url，跳过字符 ？前面的所有字符，如果遍历完毕也没找到字符 ？则退出循环
+  while ((*query_string != '?') && (*query_string != '\0'))
+   query_string++;
+  
+  //退出循环后检查当前的字符是 ？还是字符串(url)的结尾
+  if (*query_string == '?')
+  {
+   //如果是 ？ 的话，证明这个请求需要调用 cgi，将 cgi 标志变量置一(true)
+   cgi = 1;
+   //从字符 ？ 处把字符串 url 给分隔会两份
+   *query_string = '\0';
+   //使指针指向字符 ？后面的那个字符
+   query_string++;
+  }
+ }
 
-	 //将method后面的空白字符串过滤
-	 while (ISspace(buf[j]) && (j < sizeof(buf)))
-		 j++;
+ //将前面分隔两份的前面那份字符串，拼接在字符串htdocs的后面之后就输出存储到数组 path 中。相当于现在 path 中存储着一个字符串
+ sprintf(path, "htdocs%s", url);
+ 
+ //如果 path 数组中的这个字符串的最后一个字符是以字符 / 结尾的话，就拼接上一个"index.html"的字符串。首页的意思
+ if (path[strlen(path) - 1] == '/')
+  strcat(path, "index.html");
+ 
+ //在系统上去查询该文件是否存在
+ if (stat(path, &st) == -1) {
+  //如果不存在，那把这次 http 的请求后续的内容(head 和 body)全部读完并忽略
+  while ((numchars > 0) && strcmp("\n", buf))  /* read & discard headers */
+   numchars = get_line(client, buf, sizeof(buf));
+  //然后返回一个找不到文件的 response 给客户端
+  not_found(client);
+ }
+ else
+ {
+  //文件存在，那去跟常量S_IFMT相与，相与之后的值可以用来判断该文件是什么类型的
+  //S_IFMT参读《TLPI》P281，与下面的三个常量一样是包含在<sys/stat.h>
+  if ((st.st_mode & S_IFMT) == S_IFDIR)  
+   //如果这个文件是个目录，那就需要再在 path 后面拼接一个"/index.html"的字符串
+   strcat(path, "/index.html");
+   
+   //S_IXUSR, S_IXGRP, S_IXOTH三者可以参读《TLPI》P295
+  if ((st.st_mode & S_IXUSR) ||       
+      (st.st_mode & S_IXGRP) ||
+      (st.st_mode & S_IXOTH)    )
+   //如果这个文件是一个可执行文件，不论是属于用户/组/其他这三者类型的，就将 cgi 标志变量置一
+   cgi = 1;
+   
+  if (!cgi)
+   //如果不需要 cgi 机制的话，
+   serve_file(client, path);
+  else
+   //如果需要则调用
+   execute_cgi(client, path, method, query_string);
+ }
 
-	 //读取url
-	 while (!ISspace(buf[j]) && (i < sizeof(url) - 1) && (j < sizeof(buf)))
- 	 {
-  	  url[i] = buf[j];
-  	  i++; j++;
- 	 }
-	 url[i] = '\0';
-	
-	 //若请求方式为get,则可能会带有?参数查询
-	 if (strcasecmp(method, "GET") == 0)
-	 {
-		 query_string = url;
-		 while ((*query_string != '?') && (*query_string != '\0'))
-		 {
-			 query_string++;
-
-		 }
-		 if (*query_string == '?')
-		 {
-			 //使用cgi处理参数
-			 cgi = 1;
-			 
-			 //截取参数
-			 *query_string = '\0';
-			 query_string ++;
-
-		 }
-	 }
-
-	 //将url中的路径格式转化到path
-	 sprintf(path, "htdocs%s", url);
-
-	 //默认地址，解析到的路径如果为/，则自动加上index.html
-	 if (path[strlen(path) -1] == '/')
-		 strcat(path,"index.html");
-
-	 //int stat(const char *file_name, struct stat *buf)
-	 //通过文件名filename获取文件信息，并保存在buf所指的结构体stat中
-	 //返回值： 成功则0，失败则-1，错误代码存于errno（需要include <errno.h>		   ）
-	 if (stat(path,&st) == -1)
-	 {
-		 //如果访问的网页不存在，则不断读取剩下的请求头信息，并丢弃
-		 while ((numchars >0) && ("\n",buf))
-			 numchars = get_line(client, buf, sizeof(buf));
-
-		 //声明网页不存在
-		 not_found(client);
-	 }
-	 else
-	 {
-		 //如果网页存在则进行处理
-		 if ((st.st_mode & S_IFMT) == S_IFDIR) //S_IFDIR代表目录
-			 //如果路径是目录，则显示主页
-			 strcat(path, "index.html");
-		 if ((st.st_mode & S_IXUSR) ||
-      		     (st.st_mode & S_IXGRP) ||
-      	             (st.st_mode & S_IXOTH))
-      	             //S_IXUSR:文件所有者具可执行权限
-                     //S_IXGRP:用户组具可执行权限
-                     //S_IXOTH:其他用户具可读取权限
-		     cgi = 1;
-		 if( !cgi )
-			 //如果请求的不需要cgi处理，则返回静态网页
-			 serve_file(client, path);
-		 else
-			 //执行cgi动态解析
-			 execute_cgi(client, path, method, query_string);
-	 }
-	 //关闭
-	 close(client);
-	 return NULL;
+ close(client);
 }
 
 void bad_request(int client)
@@ -511,11 +497,16 @@ int startup(u_short *port)
 	//如果端口没有设置，提供个随机端口
 	 if (*port == 0)  /*动态分配一个端口 */
 	{
-	 socklen_t  namelen = sizeof(name);
+	 int namelen = sizeof(name);
 	 if (getsockname(httpd, (struct sockaddr *)&name, &namelen) == -1)
 	   error_die("getsockname");
 	 *port = ntohs(name.sin_port);
 	}
+	//开始监听
+	if (listen(httpd, 5) < 0)
+	  error_die("listen");
+	//返回socket id
+	return(httpd);
 
 }
 
@@ -560,8 +551,8 @@ int main()
 	struct sockaddr_in client_name;
 
 	//socklen_t类型
-	socklen_t client_name_len = sizeof(client_name);
-	pthread_t newthread;
+	int client_name_len = sizeof(client_name);
+	//pthread_t newthread;
 	
 	//启动server socket，启动监听，返回监听端口
 	server_sock = startup(&port);
@@ -577,11 +568,13 @@ int main()
 		client_sock =  accept(server_sock, (struct sockaddr *) &client_name,&client_name_len);
 		
 		if(client_sock == -1)
-		  error_die("accept wrong");
+		  error_die("accept");
+
+		accept_request(client_sock);
 
 		//将客户端套接字转成地址作为参数，启动线程处理新的连接
-		if (pthread_create(&newthread , NULL, accept_request, (void*)&client_sock) != 0)
-   perror("pthread_create");
+		/*if (pthread_create(&newthread , NULL, accept_request, (void*)&client_sock) != 0)
+   perror("pthread_create");*/
 	}
 	
 	//关闭server_sock;
