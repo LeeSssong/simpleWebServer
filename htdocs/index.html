@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<title>Login</title>
+	<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
+    <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.8.1/css/all.css">
+    <style type="text/css">
+    	*{
+    		font-family: "montserrat",sans-serif;
+    		
+    	}
+    	body{
+    		margin: 0;
+    		padding: 0;
+    		background: #333 
+    	}
+    	.login-box{
+    		position: absolute;
+    		top: 0;
+    		left: 0;
+    		width:  100%;
+    		height: 100%;
+    		background-image: linear-gradient(45deg,#9fbaa8,#31354c);
+    		transition: 0.4s; 
+    	}
+    	.login-form{
+    		position: absolute;
+    		top: 50%;
+    		left: 50%;
+    		transform: translate(-50%,-50%);\
+    		color: white;
+    		text-align: center;
+ 
+    	}
+    	.login-form h1{
+    		font-weight: 400;
+    		margin-top: 0; 
+    		color: white;
+    	}
+    	.txtb{
+    		display: block;
+    		box-sizing: border-box;
+    		width: 240px;
+    		background: #ffffff28;
+    		border: 1px solid white;
+    		padding: 10px 20px; 
+    		margin: 10px 0;
+    		color: white;
+    		outline: none;;
+    		border-radius: 6px;
+    		text-align: center;
+    	}
+  .login-btn{
+  	width: 240px;
+  	background: #34495e;
+  	border: 0;
+  	color: white;
+    padding: 10px;
+    border-radius: 6px;
+    cursor: pointer; 
+  }
+  .hide-login-box{ 
+  	color:#000;
+  	position: absolute;
+  	top: 40px;
+  	right:40px;
+  	cursor: pointer;
+  	font-size: 18px;
+  	opacity: .7;
+  }
+  .hide-login-box:hover{
+  	font-size: 20px;
+  	color:white;
+  }
+ 
+  .show-login-box{
+  	position: absolute;
+  	top:  50%;
+  	left: 50%;
+  	transform: translate(-50%,-50%);
+  	color: white;
+  	border: 2px solid;
+  	padding: 10px;
+  	cursor: pointer;
+  }
+ 
+  .show-login-box:hover{
+  	font-size: 20px; 
+  }
+ 
+  .showed{
+  	left: -100%;
+  	/*background: red;*/
+  }
+ 
+    </style>
+</head>
+<body>
+    <div class="show-login-box"><i class="fas fa-arrow-alt-circle-left"></i></div>
+ 
+    <div class="login-box" >
+    	<div class="hide-login-box">
+    		<i class="fas fa-times" title="Close"></i>
+    	</div> 
+    	<form class="login-form" action="index.html" method="post">
+    		
+    		<h1 class="title">Welcome</h1>
+    		<input class="txtb" type="text" name="" placeholder="Username">
+    		<input class="txtb" type="password" name="" placeholder="Password">
+    		<input type="submit" class="login-btn" value ="Login">
+    	</form>
+    </div>
+    <script type="text/javascript">
+    	$(".show-login-box").on("click",function(){
+            $(".login-box").toggleClass("showed");
+    	});
+    	$(".hide-login-box").on("click",function(){
+            $(".login-box").toggleClass("showed");
+    	});
+    </script>
+</body>
+</html>
